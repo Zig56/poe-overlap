@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор перекрытия снарядов</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #1a1a1a;
+            font-weight: 600;
+        }
+
+        .container {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 850px;
+            box-sizing: border-box;
+        }
+        
+        canvas {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #ffffff;
+            cursor: grab;
+            width: 100%;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            width: 100%;
+            margin-bottom: 25px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .value-display {
+            font-weight: 600;
+            color: #007aff;
+        }
+        
+        .view-controls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-top: 15px;
+        }
+        
+        #resetView {
+            padding: 8px 16px;
+            border: none;
+            background-color: #007aff;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        #resetView:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Калькулятор перекрытия снарядов</h1>
+
+    <div class="container">
+        <div class="controls">
+            <div class="control-group">
+                <label for="numProjectiles">Количество снарядов: <span id="numProjectilesValue" class="value-display">5</span></label>
+                <input type="range" id="numProjectiles" min="1" max="15" value="5">
+            </div>
+            <div class="control-group">
+                <label for="distance">Расстояние: <span id="distanceValue" class="value-display">10</span></label>
+                <input type="range" id="distance" min="0" max="50" value="10">
+            </div>
+            <div class="control-group">
+                <label for="radius">Радиус: <span id="radiusValue" class="value-display">20</span></label>
+                <input type="range" id="radius" min="5" max="100" value="20">
+            </div>
+        </div>
+        
+        <canvas id="overlapCanvas" width="800" height="450"></canvas>
+        
+        <div class="view-controls">
+             <div class="control-group" style="flex:1;">
+                <label for="zoom">Масштаб: <span id="zoomValue" class="value-display">5.0</span>x</label>
+                <input type="range" id="zoom" min="0.2" max="10" value="5" step="0.1">
+            </div>
+            <button id="resetView">Сбросить вид</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('overlapCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Элементы управления
+        const numProjectilesSlider = document.getElementById('numProjectiles');
+        const distanceSlider = document.getElementById('distance');
+        const radiusSlider = document.getElementById('radius');
+        const zoomSlider = document.getElementById('zoom');
+        const resetBtn = document.getElementById('resetView');
+        
+        // Отображение значений
+        const numProjectilesValue = document.getElementById('numProjectilesValue');
+        const distanceValue = document.getElementById('distanceValue');
+        const radiusValue = document.getElementById('radiusValue');
+        const zoomValue = document.getElementById('zoomValue');
+
+        // Состояние вида (масштаб и панорамирование)
+        const defaultView = {
+            scale: 5.0, // <-- ИЗМЕНЕНИЕ: Новый масштаб по умолчанию
+            pan: { x: canvas.width / 2, y: canvas.height / 2 }
+        };
+        
+        let view = { ...defaultView };
+
+        // Состояние для перетаскивания
+        let isDragging = false;
+        let lastMousePos = { x: 0, y: 0 };
+        
+        function getMousePos(event) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top
+            };
+        }
+
+        // Функция отрисовки сетки с учетом масштаба
+        function drawGrid() {
+            ctx.strokeStyle = '#e9e9e9';
+            ctx.lineWidth = 1 / view.scale; 
+            const gridSize = 50;
+
+            const viewLeft = -view.pan.x / view.scale;
+            const viewTop = -view.pan.y / view.scale;
+            const viewRight = (canvas.width - view.pan.x) / view.scale;
+            const viewBottom = (canvas.height - view.pan.y) / view.scale;
+
+            for (let x = Math.floor(viewLeft / gridSize) * gridSize; x < viewRight; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, viewTop);
+                ctx.lineTo(x, viewBottom);
+                ctx.stroke();
+            }
+            for (let y = Math.floor(viewTop / gridSize) * gridSize; y < viewBottom; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(viewLeft, y);
+                ctx.lineTo(viewRight, y);
+                ctx.stroke();
+            }
+        }
+        
+        function draw() {
+            const numProjectiles = parseInt(numProjectilesSlider.value);
+            const distance = parseInt(distanceSlider.value);
+            const radius = parseInt(radiusSlider.value);
+
+            numProjectilesValue.textContent = numProjectiles;
+            distanceValue.textContent = distance;
+            radiusValue.textContent = radius;
+            zoomValue.textContent = view.scale.toFixed(1);
+            zoomSlider.value = view.scale;
+
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.translate(view.pan.x, view.pan.y);
+            ctx.scale(view.scale, view.scale);
+
+            drawGrid();
+
+            const totalWidth = (numProjectiles - 1) * distance;
+            const startX = -totalWidth / 2;
+
+            ctx.fillStyle = 'rgba(0, 170, 255, 0.25)';
+            for (let i = 0; i < numProjectiles; i++) {
+                const projectileX = startX + i * distance;
+                ctx.beginPath();
+                ctx.arc(projectileX, 0, radius, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+
+            ctx.fillStyle = '#005c99';
+            for (let i = 0; i < numProjectiles; i++) {
+                const projectileX = startX + i * distance;
+                ctx.beginPath();
+                ctx.arc(projectileX, 0, 4 / view.scale, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+
+        // --- ОБРАБОТЧИКИ СОБЫТИЙ ---
+
+        [numProjectilesSlider, distanceSlider, radiusSlider].forEach(slider => {
+            slider.addEventListener('input', draw);
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const mousePos = getMousePos(e);
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+
+            const mouseWorldPosBefore = {
+                x: (mousePos.x - view.pan.x) / view.scale,
+                y: (mousePos.y - view.pan.y) / view.scale
+            };
+
+            view.scale *= zoomFactor;
+            view.scale = Math.max(parseFloat(zoomSlider.min), Math.min(parseFloat(zoomSlider.max), view.scale));
+            
+            const mouseWorldPosAfter = {
+                x: (mousePos.x - view.pan.x) / view.scale,
+                y: (mousePos.y - view.pan.y) / view.scale
+            };
+
+            view.pan.x += (mouseWorldPosAfter.x - mouseWorldPosBefore.x) * view.scale;
+            view.pan.y += (mouseWorldPosAfter.y - mouseWorldPosBefore.y) * view.scale;
+
+            draw();
+        });
+
+        zoomSlider.addEventListener('input', () => {
+            view.scale = parseFloat(zoomSlider.value);
+            draw();
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastMousePos = getMousePos(e);
+            canvas.style.cursor = 'grabbing';
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const mousePos = getMousePos(e);
+            const dx = mousePos.x - lastMousePos.x;
+            const dy = mousePos.y - lastMousePos.y;
+            view.pan.x += dx;
+            view.pan.y += dy;
+            lastMousePos = mousePos;
+            draw();
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+        });
+        
+        // ИЗМЕНЕНИЕ: Кнопка сброса теперь использует объект defaultView
+        resetBtn.addEventListener('click', () => {
+            view = { ...defaultView }; // Восстанавливаем изначальный вид
+            draw();
+        });
+
+        draw();
+    </script>
+</body>
+</html>
